@@ -1,0 +1,36 @@
+{
+  "name": "bdbstore",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Berkeley DB v5.3 C API bindings for node.js",
+  "author": {
+    "name": "George Magiros",
+    "email": "gmagiros@gmail.com"
+  },
+  "bugs": {
+    "url": "https://github.com/roseengineering/bdbstore/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/roseengineering/bdbstore.git"
+  },
+  "engines": {
+    "node": ">= 0.8.0"
+  },
+  "main": "./index.js",
+  "private": false,
+  "gypfile": true,
+  "scripts": {
+    "preinstall": "node-gyp configure build",
+    "test": "mkdir env; rm -f env/*; node_modules/.bin/nodeunit spec.js"
+  },
+  "keyworks": [
+    "nosql",
+    "berkeleydb",
+    "database"
+  ],
+  "readmeFilename": "README.md",
+  "devDependencies": {
+    "nodeunit": "~0.9.0"
+  }
+}
