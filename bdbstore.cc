@@ -1,4 +1,3 @@
-
 /***
 Copyright 2014 George Magiros under the terms of the MIT LICENSE.
 
@@ -756,6 +755,7 @@ Local<Object> db_object(DB *db, DB_TXN *txn) {
     SET_METHOD("open", _db_open);                // returns err
     SET_METHOD("close", _db_close);              // returns err
     SET_METHOD("flags", _db_set_flags);          // returns err
+    SET_METHOD("enter", _db_enter);              // returns new db object
     SET_METHOD("commit", _txn_commit);           // async (err)
     SET_METHOD("abort", _txn_abort);             // async (err)
     SET_METHOD("begin", _env_txn_begin);         // async
