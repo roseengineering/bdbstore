@@ -86,7 +86,6 @@ DB_ENV *dbenv = NULL;
 Local<Object> db_object(DB*, DB_TXN*);
 Local<Object> env_object();
 Handle<Value> err_object(int);
-Local<Object> txn_object(DB_TXN *);
 Local<Object> cursor_object(DBC *);
 
 // async functions
@@ -396,43 +395,6 @@ are as follows:
 */
 
 /***
-    env.begin([options], callback)
-
-The method begin calls DB\_ENV->txn\_begin().  Once the transaction
-begins the callback is called with two arguments, the first being the
-error object while the second is the transaction object.  The
-transaction object has methods for committing or aborting the 
-started transaction.  It also has a method for wrapping a database
-object in the transaction.  This method returns undefined.
-*/
-
-Handle<Value> _env_txn_begin(const Arguments& args) {
-    struct f {
-        static void async_abort(uv_work_t *req) {
-            AsyncData *data = (AsyncData *) req->data;
-            DB_TXN* txn;
-            data->err = dbenv->txn_begin(dbenv, data->txn, &txn, data->flags);
-            data->data = txn;
-        };
-        static void async_after(uv_work_t *req) {
-            ASYNC_AFTER_HEAD;
-            result = txn_object((DB_TXN*) data->data);
-            ASYNC_AFTER_TAIL(2);
-        }
-    };
-    CHECK_NUMARGS(1, 2);
-    CHECK_CALLBACK;
-    GET_DBTXN;
-    uv_queue_work(uv_default_loop(), 
-        async_before(NULL, txn, NULL, 0, 0, 
-            args[args.Length() - 1], // callback
-            args.Length() > 1 ? get_flags(args[0]) : 0), 
-        f::async_abort, 
-        (uv_after_work_cb) f::async_after);
-    RETURN_UNDEFINED;
-}
-
-/***
     err = env.flags(options, [onoff])
 
 The method flags calls DB\_ENV->set\_flags().  The onoff argument is
@@ -480,7 +442,6 @@ Local<Object> env_object() {
     SET_METHOD("flags", _env_set_flags);        // returns err
     SET_METHOD("open", _env_open);              // returns err
     SET_METHOD("close", _env_close);            // returns err
-    SET_METHOD("begin", _env_txn_begin);        // async
     return target;
 }
 
@@ -493,161 +454,6 @@ The database object wraps the database handle returned by the Berkeley
 DB C API.  The object's methods for manipulating this handle are as
 follows:
 */
-
-/**
-    db.cursor([options], callback)
-
-The method calls DB->cursor() to create a cursor for the database.
-The calllback is called with null or an error object from the call as
-the first argument.  The second argument passed is a cursor object 
-which has methods for manipulating the created cursor.  This method
-returns undefined.
-*/
-Handle<Value> _db_cursor(const Arguments& args) {
-    struct f {
-        static void async_begin(uv_work_t *req) {
-            AsyncData *data = (AsyncData *) req->data;
-            DBC *cur = NULL;
-            data->err = data->db->cursor(data->db, data->txn, &cur, data->flags);
-            data->data = cur;
-        };
-        static void async_after(uv_work_t *req) {
-            ASYNC_AFTER_HEAD;
-            result = cursor_object((DBC*) data->data);
-            ASYNC_AFTER_TAIL(2);
-        }
-    };
-    CHECK_NUMARGS(1, 2);
-    CHECK_CALLBACK;
-    GET_DBTXN;
-    GET_DB;
-    uv_queue_work(uv_default_loop(), 
-        async_before(db, txn, NULL, 0, 0, 
-            args[args.Length() - 1], // callback
-            args.Length() > 1 ? get_flags(args[0]) : 0),
-        f::async_begin, 
-        (uv_after_work_cb) f::async_after);
-    RETURN_UNDEFINED;
-}
-
-/**
-    db.get(key, [options], callback)
-
-The method calls DB->get().  The callback is called with a null or an
-error object returned from the call as the first argument.  The second
-argument is the found value (or array of values if the 'multiple'
-option is set) for the key.  The third argument is the key.  The
-function returns undefined.
-*/
-Handle<Value> _db_get(const Arguments& args) {
-    struct f {
-        static void async_get(uv_work_t *req) {
-            AsyncData *data = (AsyncData *) req->data;
-            data->err = data->db->get(data->db, data->txn, data->key_dbt, data->data_dbt, data->flags);
-        }
-    };
-    CHECK_NUMARGS(2, 3);
-    CHECK_CALLBACK;
-    GET_DBTXN;
-    GET_DB;
-    String::Utf8Value key(args[0]);
-    uv_queue_work(uv_default_loop(), 
-        async_before(db, txn, NULL, *key, 0, 
-            args[args.Length() - 1], // callback
-            args.Length() > 2 ? get_flags(args[1]) : 0, 1), 
-        f::async_get, 
-        (uv_after_work_cb) async_after);
-    RETURN_UNDEFINED;
-}
-
-/**
-    db.del(key, [options], callback)
-
-The method calls DB->del() to delete key-values from the database.
-Multiple deletes in a single call are unsupported at the moment. The
-callback is called with a null or an error object returned from the
-call as the first argument.  The second argument is undefined.  The
-third argument is the key passed.  This method returns undefined.
-*/
-Handle<Value> _db_del(const Arguments& args) {
-    struct f {
-        static void async_del(uv_work_t *req) {
-            AsyncData *data = (AsyncData *) req->data;
-            data->err = data->db->del(data->db, data->txn, data->key_dbt, data->flags);
-        }
-    };
-    CHECK_NUMARGS(2, 3);
-    CHECK_CALLBACK;
-    GET_DBTXN;
-    GET_DB;
-    String::Utf8Value key(args[0]);
-    uv_queue_work(uv_default_loop(), 
-        async_before(db, txn, NULL, *key, 0, 
-            args[args.Length() - 1], // callback
-            args.Length() > 2 ? get_flags(args[1]) : 0, 1), 
-        f::async_del, 
-        (uv_after_work_cb) async_after);
-    RETURN_UNDEFINED;
-}
-
-/**
-    db.put(key, value, [options], callback)
- 
-The method calls DB->put() to put the given key-value pair into the
-database.  Multiple puts in single call are unsupported at the moment.
-The callback is called with a null or an error object returned from
-the call as the first argument.  The second argument is the value
-passed.  The third argument is the key passed.  This method returns
-undefined.
-*/
-Handle<Value> _db_put(const Arguments& args) {
-    struct f {
-        static void async_put(uv_work_t *req) {
-            AsyncData *data = (AsyncData *) req->data;
-            data->err = data->db->put(data->db, data->txn, data->key_dbt, data->data_dbt, data->flags);
-        }
-    };
-    CHECK_NUMARGS(3, 4);
-    CHECK_CALLBACK;
-    GET_DBTXN;
-    GET_DB;
-    String::Utf8Value key(args[0]);
-    String::Utf8Value value(args[1]);
-    uv_queue_work(uv_default_loop(), 
-        async_before(db, txn, NULL, *key, *value, 
-            args[args.Length() - 1], // callback
-            args.Length() > 3 ? get_flags(args[2]) : 0, 1), 
-        f::async_put, 
-        (uv_after_work_cb) async_after);
-    RETURN_UNDEFINED;
-}
-
-/**
-    err = db.flags(options)
-
-The method calls DB->set\_flags() to set database specific options.
-Null is returned if no error occurs otherwise an error object is
-returned.
-*/
-Handle<Value> _db_set_flags(const Arguments& args) {
-    CHECK_NUMARGS(1, 1);
-    GET_DB;
-    int ret = db->set_flags(db, get_flags(args[0]));
-    RETURN_ERR;
-}
-
-/**
-    err = db.close()
-
-The method calls DB->close() to close the database object.  
-This method returns null or an error object.
-*/
-Handle<Value> _db_close(const Arguments& args) {
-    CHECK_NUMARGS(0, 0);
-    GET_DB;
-    int ret = db->close(db, 0);
-    RETURN_ERR;
-}
 
 /**
     err = db.open(filename, [options, [mode]])
@@ -680,6 +486,267 @@ Handle<Value> _db_open(const Arguments& args) {
     RETURN_ERR;
 }
 
+/**
+    err = db.close()
+
+The method calls DB->close() to close the database object.  
+This method returns null or an error object.
+*/
+Handle<Value> _db_close(const Arguments& args) {
+    CHECK_NUMARGS(0, 0);
+    GET_DB;
+    int ret = db->close(db, 0);
+    RETURN_ERR;
+}
+
+/**
+    db.get(key, [options], callback)
+
+The method calls DB->get().  The callback is called with a null or an
+error object returned from the call as the first argument.  The second
+argument is the found value (or array of values if the 'multiple'
+option is set) for the key.  The third argument is the key.  The
+function returns undefined.
+*/
+Handle<Value> _db_get(const Arguments& args) {
+    struct f {
+        static void async_main(uv_work_t *req) {
+            AsyncData *data = (AsyncData *) req->data;
+            data->err = data->db->get(data->db, data->txn, data->key_dbt, data->data_dbt, data->flags);
+        }
+    };
+    CHECK_NUMARGS(2, 3);
+    CHECK_CALLBACK;
+    GET_DBTXN;
+    GET_DB;
+    String::Utf8Value key(args[0]);
+    uv_queue_work(uv_default_loop(), 
+        async_before(db, txn, NULL, *key, 0, 
+            args[args.Length() - 1], // callback
+            args.Length() > 2 ? get_flags(args[1]) : 0, 1), 
+        f::async_main, 
+        (uv_after_work_cb) async_after);
+    RETURN_UNDEFINED;
+}
+
+/**
+    db.put(key, value, [options], callback)
+ 
+The method calls DB->put() to put the given key-value pair into the
+database.  Multiple puts in single call are unsupported at the moment.
+The callback is called with a null or an error object returned from
+the call as the first argument.  The second argument is the value
+passed.  The third argument is the key passed.  This method returns
+undefined.
+*/
+Handle<Value> _db_put(const Arguments& args) {
+    struct f {
+        static void async_main(uv_work_t *req) {
+            AsyncData *data = (AsyncData *) req->data;
+            data->err = data->db->put(data->db, data->txn, data->key_dbt, data->data_dbt, data->flags);
+        }
+    };
+    CHECK_NUMARGS(3, 4);
+    CHECK_CALLBACK;
+    GET_DBTXN;
+    GET_DB;
+    String::Utf8Value key(args[0]);
+    String::Utf8Value value(args[1]);
+    uv_queue_work(uv_default_loop(), 
+        async_before(db, txn, NULL, *key, *value, 
+            args[args.Length() - 1], // callback
+            args.Length() > 3 ? get_flags(args[2]) : 0, 1), 
+        f::async_main, 
+        (uv_after_work_cb) async_after);
+    RETURN_UNDEFINED;
+}
+
+/**
+    db.del(key, [options], callback)
+
+The method calls DB->del() to delete key-values from the database.
+Multiple deletes in a single call are unsupported at the moment. The
+callback is called with a null or an error object returned from the
+call as the first argument.  The second argument is undefined.  The
+third argument is the key passed.  This method returns undefined.
+*/
+Handle<Value> _db_del(const Arguments& args) {
+    struct f {
+        static void async_main(uv_work_t *req) {
+            AsyncData *data = (AsyncData *) req->data;
+            data->err = data->db->del(data->db, data->txn, data->key_dbt, data->flags);
+        }
+    };
+    CHECK_NUMARGS(2, 3);
+    CHECK_CALLBACK;
+    GET_DBTXN;
+    GET_DB;
+    String::Utf8Value key(args[0]);
+    uv_queue_work(uv_default_loop(), 
+        async_before(db, txn, NULL, *key, 0, 
+            args[args.Length() - 1], // callback
+            args.Length() > 2 ? get_flags(args[1]) : 0, 1), 
+        f::async_main, 
+        (uv_after_work_cb) async_after);
+    RETURN_UNDEFINED;
+}
+
+/**
+    db.cursor([options], callback)
+
+The method calls DB->cursor() to create a cursor for the database.
+The calllback is called with null or an error object from the call as
+the first argument.  The second argument passed is a cursor object 
+which has methods for manipulating the created cursor.  This method
+returns undefined.
+*/
+Handle<Value> _db_cursor(const Arguments& args) {
+    struct f {
+        static void async_main(uv_work_t *req) {
+            AsyncData *data = (AsyncData *) req->data;
+            DBC *cur = NULL;
+            data->err = data->db->cursor(data->db, data->txn, &cur, data->flags);
+            data->data = cur;
+        };
+        static void async_after(uv_work_t *req) {
+            ASYNC_AFTER_HEAD;
+            result = cursor_object((DBC*) data->data);
+            ASYNC_AFTER_TAIL(2);
+        }
+    };
+    CHECK_NUMARGS(1, 2);
+    CHECK_CALLBACK;
+    GET_DBTXN;
+    GET_DB;
+    uv_queue_work(uv_default_loop(), 
+        async_before(db, txn, NULL, 0, 0, 
+            args[args.Length() - 1], // callback
+            args.Length() > 1 ? get_flags(args[0]) : 0),
+        f::async_main, 
+        (uv_after_work_cb) f::async_after);
+    RETURN_UNDEFINED;
+}
+
+/**
+    err = db.flags(options)
+
+The method calls DB->set\_flags() to set database specific options.
+Null is returned if no error occurs otherwise an error object is
+returned.
+*/
+Handle<Value> _db_set_flags(const Arguments& args) {
+    CHECK_NUMARGS(1, 1);
+    GET_DB;
+    int ret = db->set_flags(db, get_flags(args[0]));
+    RETURN_ERR;
+}
+
+/**
+    db.begin([options], callback)
+
+This method calls DB\_TXN->txn\_begin().
+Once the transaction begins the callback is called with two arguments, 
+the first being the error object while the second is a new database object
+wrapped in the created transaction.
+If the current database object is already wrapped in a transaction
+the new transaction will be nested within it.
+This method returns undefined.
+*/
+
+Handle<Value> _env_txn_begin(const Arguments& args) {
+    struct f {
+        static void async_main(uv_work_t *req) {
+            AsyncData *data = (AsyncData *) req->data;
+            DB_TXN* txn;
+            data->err = dbenv->txn_begin(dbenv, data->txn, &txn, data->flags);
+            data->data = txn;
+        };
+        static void async_after(uv_work_t *req) {
+            ASYNC_AFTER_HEAD;
+            result = db_object(data->db, (DB_TXN*) data->data);
+            ASYNC_AFTER_TAIL(2);
+        }
+    };
+    CHECK_NUMARGS(1, 2);
+    CHECK_CALLBACK;
+    GET_DBTXN;
+    GET_DB;
+    uv_queue_work(uv_default_loop(), 
+        async_before(db, txn, NULL, 0, 0, 
+            args[args.Length() - 1], // callback
+            args.Length() > 1 ? get_flags(args[0]) : 0), 
+        f::async_main, 
+        (uv_after_work_cb) f::async_after);
+    RETURN_UNDEFINED;
+}
+
+/**
+    db.commit(callback)
+
+This method calls DB\_TXN->commit().  The passed callback is called
+with one argument, a null or an error object returned from the commit call.
+This method returns undefined.
+*/
+
+Handle<Value> _txn_commit(const Arguments& args) {
+    struct f {
+        static void async_commit(uv_work_t *req) {
+            AsyncData *data = (AsyncData *) req->data;
+            data->err = data->txn->commit(data->txn, 0);
+        };
+    };
+    CHECK_NUMARGS(1, 1);
+    CHECK_CALLBACK;
+    GET_DBTXN;
+    uv_queue_work(uv_default_loop(), 
+        async_before(NULL, txn, NULL, 0, 0, args[0]), 
+        f::async_commit, 
+        (uv_after_work_cb) async_after);
+    RETURN_UNDEFINED;
+}
+
+/**
+    db.abort(callback)
+
+This method calls DB\_TXN->abort().  The passed callback is called
+with one argument, null or an error object returned from the abort call.
+The function returns undefined.
+*/
+
+Handle<Value> _txn_abort(const Arguments& args) {
+    struct f {
+        static void async_main(uv_work_t *req) {
+            AsyncData *data = (AsyncData *) req->data;
+            data->err = data->txn->abort(data->txn);
+        };
+    };
+    CHECK_NUMARGS(1, 1);
+    CHECK_CALLBACK;
+    GET_DBTXN;
+    uv_queue_work(uv_default_loop(), 
+        async_before(NULL, txn, NULL, 0, 0, args[0]), 
+        f::async_main, 
+        (uv_after_work_cb) async_after);
+    RETURN_UNDEFINED;
+}
+
+/**
+    newdb = db.enter(otherdb)
+
+This method takes the passed database object and creates a new
+database object encapsulating the method's transaction handle.
+Any calls off this newly created database object will use this transaction
+handle when making Berkeley DB API calls.
+*/
+
+Handle<Value> _db_enter(const Arguments& args) {
+    CHECK_NUMARGS(1, 1);
+    GET_DBTXN;
+    DB *db = (DB*) GET_EXTERNAL(args[0]->ToObject(), "_db");
+    HandleScope scope;
+    return scope.Close(db_object(db, txn));
+}
+
 Local<Object> db_object(DB *db, DB_TXN *txn) {
     Local<Object> target = Object::New();
     SET_METHOD("cursor", _db_cursor);            // async (err, cursor obj)
@@ -689,6 +756,9 @@ Local<Object> db_object(DB *db, DB_TXN *txn) {
     SET_METHOD("open", _db_open);                // returns err
     SET_METHOD("close", _db_close);              // returns err
     SET_METHOD("flags", _db_set_flags);          // returns err
+    SET_METHOD("commit", _txn_commit);           // async (err)
+    SET_METHOD("abort", _txn_abort);             // async (err)
+    SET_METHOD("begin", _env_txn_begin);         // async
     SET_EXTERNAL(target, "_db", db);
     if (txn) SET_EXTERNAL(target, "_txn", txn);
     return target;
@@ -717,7 +787,7 @@ method returns undefined.
 
 Handle<Value> _cursor_put(const Arguments& args) {
     struct f {
-        static void async_put(uv_work_t *req) {
+        static void async_main(uv_work_t *req) {
             AsyncData *data = (AsyncData *) req->data;
             data->err = data->cur->put(data->cur, data->key_dbt, data->data_dbt, data->flags);
         };
@@ -732,7 +802,7 @@ Handle<Value> _cursor_put(const Arguments& args) {
             args[args.Length() - 1], // callback
             get_flags(args[2]), 
             1), 
-        f::async_put, 
+        f::async_main, 
         (uv_after_work_cb) async_after);
     RETURN_UNDEFINED;
 }
@@ -752,7 +822,7 @@ referred to.  Multiple values are supported through the options
 
 Handle<Value> _cursor_get(const Arguments& args) {
     struct f {
-        static void async_get(uv_work_t *req) {
+        static void async_main(uv_work_t *req) {
             AsyncData *data = (AsyncData *) req->data;
             data->err = data->cur->get(data->cur, data->key_dbt, data->data_dbt, data->flags);
         };
@@ -767,7 +837,7 @@ Handle<Value> _cursor_get(const Arguments& args) {
             args[args.Length() - 1], // callback
             get_flags(args[args.Length() > 2 ? 1 : 0]), 
             1), 
-        f::async_get, 
+        f::async_main, 
         (uv_after_work_cb) async_after);
     RETURN_UNDEFINED;
 }
@@ -783,7 +853,7 @@ parameter.  This method returns undefined.
 
 Handle<Value> _cursor_del(const Arguments& args) {
     struct f {
-        static void async_del(uv_work_t *req) {
+        static void async_main(uv_work_t *req) {
             AsyncData *data = (AsyncData *) req->data;
             data->err = data->cur->del(data->cur, data->flags);
         };
@@ -795,7 +865,7 @@ Handle<Value> _cursor_del(const Arguments& args) {
         async_before(NULL, NULL, cur, 0, 0, 
             args[args.Length() - 1], // callback
             args.Length() > 1 ? get_flags(args[0]) : 0), 
-        f::async_del, 
+        f::async_main, 
         (uv_after_work_cb) async_after);
     RETURN_UNDEFINED;
 }
@@ -810,7 +880,7 @@ as its first parameter.  This method returns undefined.
 
 Handle<Value> _cursor_close(const Arguments& args) {
     struct f {
-        static void async_del(uv_work_t *req) {
+        static void async_main(uv_work_t *req) {
             AsyncData *data = (AsyncData *) req->data;
             data->err = data->cur->close(data->cur); 
         };
@@ -820,7 +890,7 @@ Handle<Value> _cursor_close(const Arguments& args) {
     GET_DBCUR;
     uv_queue_work(uv_default_loop(), 
         async_before(NULL, NULL, cur, 0, 0, args[0]), 
-        f::async_del, 
+        f::async_main, 
         (uv_after_work_cb) async_after);
     RETURN_UNDEFINED;
 }
@@ -834,103 +904,6 @@ Local<Object> cursor_object(DBC *cur) {
     SET_EXTERNAL(target, "_cur", cur);
     return target;
 }
-
-/***
-The transaction object
---------------------------------------
-
-The transaction object wraps the transaction handle returned by the
-Berkeley DB C API.  The object's methods for manipulating this handle
-are as follows:
-*/
-
-/**
-    txn.commit(callback)
-
-This method calls DB\_TXN->commit().  The passed callback is called
-with one argument, a null or an error object returned from the commit call.
-This method returns undefined.
-*/
-
-Handle<Value> _txn_commit(const Arguments& args) {
-    struct f {
-        static void async_commit(uv_work_t *req) {
-            AsyncData *data = (AsyncData *) req->data;
-            data->err = data->txn->commit(data->txn, 0);
-        };
-    };
-    CHECK_NUMARGS(1, 1);
-    CHECK_CALLBACK;
-    GET_DBTXN;
-    uv_queue_work(uv_default_loop(), 
-        async_before(NULL, txn, NULL, 0, 0, args[0]), 
-        f::async_commit, 
-        (uv_after_work_cb) async_after);
-    RETURN_UNDEFINED;
-}
-
-/**
-    txn.abort(callback)
-
-This method calls DB\_TXN->abort().  The passed callback is called
-with one argument, null or an error object returned from the abort call.
-The function returns undefined.
-*/
-
-Handle<Value> _txn_abort(const Arguments& args) {
-    struct f {
-        static void async_abort(uv_work_t *req) {
-            AsyncData *data = (AsyncData *) req->data;
-            data->err = data->txn->abort(data->txn);
-        };
-    };
-    CHECK_NUMARGS(1, 1);
-    CHECK_CALLBACK;
-    GET_DBTXN;
-    uv_queue_work(uv_default_loop(), 
-        async_before(NULL, txn, NULL, 0, 0, args[0]), 
-        f::async_abort, 
-        (uv_after_work_cb) async_after);
-    RETURN_UNDEFINED;
-}
-
-/**
-    newdb = txn.wrap(db)
-
-This method takes the passed database object and creates a new
-database object encapsulating the transaction handle from the
-transaction object.  Any database method calls off this newly created
-database object will use this transaction handle when making Berkeley
-DB API calls.
-*/
-
-Handle<Value> _txn_wrap(const Arguments& args) {
-    CHECK_NUMARGS(1, 1);
-    GET_DBTXN;
-    DB *db = (DB*) GET_EXTERNAL(args[0]->ToObject(), "_db");
-    HandleScope scope;
-    return scope.Close(db_object(db, txn));
-}
-
-/**
-    txn.begin([options], callback)
-
-This method calls DB\_TXN->txn\_begin().  The new transaction will be
-nested within the transaction object this method is called on.  The
-passed callback is called with one argument, null or an error object
-returned from the txn\_begin API call.  This method returns undefined.
-*/
-
-Local<Object> txn_object(DB_TXN *txn) {
-    Local<Object> target = Object::New();
-    SET_METHOD("commit", _txn_commit);       // async (err)
-    SET_METHOD("abort", _txn_abort);         // async (err)
-    SET_METHOD("wrap", _txn_wrap);           // returns new db object
-    SET_METHOD("begin", _env_txn_begin);        // async
-    SET_EXTERNAL(target, "_txn", txn);
-    return target;
-}
-
 
 /////////////// addon initialization ////////////////
 
@@ -978,8 +951,8 @@ A transaction operation example:
     });
     var db = store.createDb();
     db.open('store.db', { create: true, auto_commit: true });
-    env.begin(function(err, txn) {
-        txn.wrap(db).put('Bali', 'Denpasar', function(err, value, key) {
+    db.begin(function(err, txn) {
+        txn.put('Bali', 'Denpasar', function(err, value, key) {
             if (!err) console.log('put:', key, value)
             txn.commit(function(err) {
                 if (!err) console.log('put committed')

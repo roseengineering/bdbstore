@@ -504,29 +504,6 @@ exports["should open a transaction data store"] = function (test) {
 };
 
 exports["should begin a transaction"] = function (test) {
-    var env = store.createEnv();
-    var err = env.open('env', {
-        private: true, 
-        create: true, 
-        init_mpool: true,
-        init_txn: true, 
-        thread: true,
-        init_lock: true,
-        init_log: true,
-        recover: true,
-    });
-    env.begin(function(err, txn) {
-        test.ok(!err);
-        txn.commit(function(err) {
-            test.ok(!err);
-            err = env.close();
-            test.ok(!err);
-            test.done();
-        });
-    });
-};
-
-exports["should open a transaction supporting database"] = function (test) {
     var err, db, env = store.createEnv();
     err = env.open('env', {
         private: true, 
@@ -541,13 +518,8 @@ exports["should open a transaction supporting database"] = function (test) {
     db = store.createDb();
     err = db.open("180.db", { create: true, auto_commit: true });
     test.ok(!err);
-    err = db.close();
-    test.ok(!err);
 
-    env.begin(function(err, txn) {
-        test.ok(!err);
-        db = store.createDb();
-        err = txn.wrap(db).open("190.db", { create: true });
+    db.begin(function(err, txn) {
         test.ok(!err);
         txn.commit(function(err) {
             test.ok(!err);
@@ -561,7 +533,7 @@ exports["should open a transaction supporting database"] = function (test) {
 };
 
 
-exports["should commit a change"] = function (test) {
+exports["should commit a transaction"] = function (test) {
     var err, db, env = store.createEnv();
     err = env.open('env', {
         private: true, 
@@ -575,9 +547,9 @@ exports["should commit a change"] = function (test) {
     });
     db = store.createDb();
     db.open("190.db", { create: true, auto_commit: true });
-    env.begin(function(err, txn) {
+    db.begin(function(err, txn) {
         test.ok(!err);
-        txn.wrap(db).put('Bali', 'Denpasar', function(err) {
+        txn.put('Bali', 'Denpasar', function(err) {
             test.ok(!err);
             txn.commit(function(err) {
                 test.ok(!err);
@@ -592,7 +564,7 @@ exports["should commit a change"] = function (test) {
     });
 };
 
-exports["should abort a change"] = function (test) {
+exports["should abort a transaction"] = function (test) {
     var err, db, env = store.createEnv();
     err = env.open('env', {
         private: true, 
@@ -606,9 +578,9 @@ exports["should abort a change"] = function (test) {
     });
     db = store.createDb();
     db.open("200.db", { create: true, auto_commit: true });
-    env.begin(function(err, txn) {
+    db.begin(function(err, txn) {
         test.ok(!err);
-        txn.wrap(db).put('Bali', 'Denpasar', function(err) {
+        txn.put('Bali', 'Denpasar', function(err) {
             test.ok(!err);
             txn.abort(function(err) {
                 test.ok(!err);
@@ -638,9 +610,9 @@ exports["should open a database transactionally when auto_commit environment fla
     });
     db = store.createDb();
     db.open("210.db", { create: true });
-    env.begin(function(err, txn) {
+    db.begin(function(err, txn) {
         test.ok(!err);
-        txn.wrap(db).put('Bali', 'Denpasar', function(err) {
+        txn.put('Bali', 'Denpasar', function(err) {
             test.ok(!err);
             txn.commit(function(err) {
                 test.ok(!err);
@@ -669,13 +641,13 @@ exports["should nest a transaction"] = function (test) {
     });
     db = store.createDb();
     db.open("190.db", { create: true, auto_commit: true });
-    env.begin(function(err, outer) {
+    db.begin(function(err, outer) {
         test.ok(!err);
-        outer.wrap(db).put('Bali', 'Denpasar', function(err) {
+        outer.put('Bali', 'Denpasar', function(err) {
             test.ok(!err);
             outer.begin(function(err, inner) {
                 test.ok(!err);
-                inner.wrap(db).get('Bali', function() { 
+                inner.get('Bali', function() { 
                     test.ok(!err);
                     outer.commit(function(err) {
                         test.ok(!err);

@@ -84,15 +84,6 @@ The environment object wraps the environment handle returned by the
 Berkeley DB C API.  The object's methods for manipulating this handle
 are as follows:
 
-    env.begin([options], callback)
-
-The method begin calls DB\_ENV->txn\_begin().  Once the transaction
-begins the callback is called with two arguments, the first being the
-error object while the second is the transaction object.  The
-transaction object has methods for committing or aborting the 
-started transaction.  It also has a method for wrapping a database
-object in the transaction.  This method returns undefined.
-
     err = env.flags(options, [onoff])
 
 The method flags calls DB\_ENV->set\_flags().  The onoff argument is
@@ -116,13 +107,18 @@ The database object wraps the database handle returned by the Berkeley
 DB C API.  The object's methods for manipulating this handle are as
 follows:
 
-    db.cursor([options], callback)
+    err = db.open(filename, [options, [mode]])
 
-The method calls DB->cursor() to create a cursor for the database.
-The calllback is called with null or an error object from the call as
-the first argument.  The second argument passed is a cursor object 
-which has methods for manipulating the created cursor.  This method
-returns undefined.
+The method opens a database by calling DB->open().  The access method
+for the new database can be changed from Btrees by setting the hash,
+heap, recno, queue or unknown options properties to true.  Mode is the
+file mode bits for the database file.  This method returns null or an
+error object.
+
+    err = db.close()
+
+The method calls DB->close() to close the database object.  
+This method returns null or an error object.
 
     db.get(key, [options], callback)
 
@@ -131,14 +127,6 @@ error object returned from the call as the first argument.  The second
 argument is the found value (or array of values if the 'multiple'
 option is set) for the key.  The third argument is the key.  The
 function returns undefined.
-
-    db.del(key, [options], callback)
-
-The method calls DB->del() to delete key-values from the database.
-Multiple deletes in a single call are unsupported at the moment. The
-callback is called with a null or an error object returned from the
-call as the first argument.  The second argument is undefined.  The
-third argument is the key passed.  This method returns undefined.
 
     db.put(key, value, [options], callback)
  
@@ -149,24 +137,56 @@ the call as the first argument.  The second argument is the value
 passed.  The third argument is the key passed.  This method returns
 undefined.
 
+    db.del(key, [options], callback)
+
+The method calls DB->del() to delete key-values from the database.
+Multiple deletes in a single call are unsupported at the moment. The
+callback is called with a null or an error object returned from the
+call as the first argument.  The second argument is undefined.  The
+third argument is the key passed.  This method returns undefined.
+
+    db.cursor([options], callback)
+
+The method calls DB->cursor() to create a cursor for the database.
+The calllback is called with null or an error object from the call as
+the first argument.  The second argument passed is a cursor object 
+which has methods for manipulating the created cursor.  This method
+returns undefined.
+
     err = db.flags(options)
 
 The method calls DB->set\_flags() to set database specific options.
 Null is returned if no error occurs otherwise an error object is
 returned.
 
-    err = db.close()
+    db.begin([options], callback)
 
-The method calls DB->close() to close the database object.  
-This method returns null or an error object.
+This method calls DB\_TXN->txn\_begin().
+Once the transaction begins the callback is called with two arguments, 
+the first being the error object while the second is a new database object
+wrapped in the created transaction.
+If the current database object is already wrapped in a transaction
+the new transaction will be nested within it.
+This method returns undefined.
 
-    err = db.open(filename, [options, [mode]])
+    db.commit(callback)
 
-The method opens a database by calling DB->open().  The access method
-for the new database can be changed from Btrees by setting the hash,
-heap, recno, queue or unknown options properties to true.  Mode is the
-file mode bits for the database file.  This method returns null or an
-error object.
+This method calls DB\_TXN->commit().  The passed callback is called
+with one argument, a null or an error object returned from the commit call.
+This method returns undefined.
+
+    db.abort(callback)
+
+This method calls DB\_TXN->abort().  The passed callback is called
+with one argument, null or an error object returned from the abort call.
+The function returns undefined.
+
+    newdb = db.enter(otherdb)
+
+This method takes the passed database object and creates a new
+database object encapsulating the method's transaction handle.
+Any calls off this newly created database object will use this transaction
+handle when making Berkeley DB API calls.
 
 The cursor object
 ---------------------------------
@@ -208,40 +228,6 @@ Closes and discards the cursor using the DBcursor->close() call.  The
 passed callback function is then called with null or an error object
 as its first parameter.  This method returns undefined.
 
-The transaction object
---------------------------------------
-
-The transaction object wraps the transaction handle returned by the
-Berkeley DB C API.  The object's methods for manipulating this handle
-are as follows:
-
-    txn.commit(callback)
-
-This method calls DB\_TXN->commit().  The passed callback is called
-with one argument, a null or an error object returned from the commit call.
-This method returns undefined.
-
-    txn.abort(callback)
-
-This method calls DB\_TXN->abort().  The passed callback is called
-with one argument, null or an error object returned from the abort call.
-The function returns undefined.
-
-    newdb = txn.wrap(db)
-
-This method takes the passed database object and creates a new
-database object encapsulating the transaction handle from the
-transaction object.  Any database method calls off this newly created
-database object will use this transaction handle when making Berkeley
-DB API calls.
-
-    txn.begin([options], callback)
-
-This method calls DB\_ENV->txn\_begin().  The new transaction will be
-nested within the transaction object this method is called on.  The
-passed callback is called with one argument, null or an error object
-returned from the txn\_begin API call.  This method returns undefined.
-
 Examples
 --------
 
@@ -250,7 +236,7 @@ A simple key-value pair get and put example:
     var store = require('bdbstore');
     var db = store.createDb();
     db.open('store.db', { create: true });
-    db.put('Bali', 'Denpasar', function(err, value, key) {
+    db.put('Bali', 'Denpasar', {}, function(err, value, key) {
         if (!err) console.log('put:', key, value)
         db.put('Bali', 'Denpasar', function(err, value, key) {
             if (!err) console.log('got:', key, value)
@@ -285,8 +271,8 @@ A transaction operation example:
     });
     var db = store.createDb();
     db.open('store.db', { create: true, auto_commit: true });
-    env.begin(function(err, txn) {
-        txn.wrap(db).put('Bali', 'Denpasar', function(err, value, key) {
+    db.begin(function(err, txn) {
+        txn.put('Bali', 'Denpasar', function(err, value, key) {
             if (!err) console.log('put:', key, value)
             txn.commit(function(err) {
                 if (!err) console.log('put committed')
